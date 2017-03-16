@@ -1,5 +1,4 @@
 import datetime
-from flask import current_app
 
 
 # Where to look for the JWT. Available options are cookies or headers

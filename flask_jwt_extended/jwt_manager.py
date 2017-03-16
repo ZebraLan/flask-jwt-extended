@@ -1,10 +1,12 @@
-from flask import jsonify
+from sanic.execptions import SanicException
 
-from flask_jwt_extended.exceptions import JWTDecodeError, NoAuthorizationError, \
+from sanic_jwt_extended.exceptions import JWTDecodeError, NoAuthorizationError, \
     InvalidHeaderError, WrongTokenError, RevokedTokenError, FreshTokenRequired, \
     CSRFError
 from jwt import ExpiredSignatureError, InvalidTokenError
 
+def _raise(e):
+    raise e
 
 class JWTManager:
     def __init__(self, app=None):
@@ -16,30 +18,30 @@ class JWTManager:
 
         # Function that will be called when an expired token is received
         self._expired_token_callback = lambda: (
-            jsonify({'msg': 'Token has expired'}), 401
+            _raise(SanicException('Token has expired', status_code=401))
         )
 
         # Function that will be called when an invalid token is received
         self._invalid_token_callback = lambda err: (
-            jsonify({'msg': err}), 422
+            _raise(SanicException(err, status_code=422))
         )
 
         # Function that will be called when attempting to access a protected
         # endpoint without a valid token
         self._unauthorized_callback = lambda err: (
-            jsonify({'msg': err}), 401
+            _raise(SanicException(err, status_code=401))
         )
 
         # Function that will be called when attempting to access a fresh_jwt_required
         # endpoint with a valid token that is not fresh
         self._needs_fresh_token_callback = lambda: (
-            jsonify({'msg': 'Fresh token required'}), 401
+            _raise(SanicException('Fresh token required', status_code=401))
         )
 
         # Function that will be called when a revoked token attempts to access
         # a protected endpoint
         self._revoked_token_callback = lambda: (
-            jsonify({'msg': 'Token has been revoked'}), 401
+            _raise(SanicException('Token has been revoked', status_code=401))
         )
 
         # Setup the app if it is given (can be passed to this constructor, or
@@ -56,41 +58,41 @@ class JWTManager:
 
         # Set propagate exceptions, so all of these error handlers properly
         # work in production
-        app.config['PROPAGATE_EXCEPTIONS'] = True
+#       app.config['PROPAGATE_EXCEPTIONS'] = True
 
-        @app.errorhandler(NoAuthorizationError)
+        @app.exception(NoAuthorizationError)
         def handle_auth_error(e):
             return self._unauthorized_callback(str(e))
 
-        @app.errorhandler(CSRFError)
+        @app.exception(CSRFError)
         def handle_auth_error(e):
             return self._unauthorized_callback(str(e))
 
-        @app.errorhandler(ExpiredSignatureError)
+        @app.exception(ExpiredSignatureError)
         def handle_expired_error(e):
             return self._expired_token_callback()
 
-        @app.errorhandler(InvalidHeaderError)
+        @app.exception(InvalidHeaderError)
         def handle_invalid_header_error(e):
             return self._invalid_token_callback(str(e))
 
-        @app.errorhandler(InvalidTokenError)
+        @app.exception(InvalidTokenError)
         def handle_invalid_token_error(e):
             return self._invalid_token_callback(str(e))
 
-        @app.errorhandler(JWTDecodeError)
+        @app.exception(JWTDecodeError)
         def handle_jwt_decode_error(e):
             return self._invalid_token_callback(str(e))
 
-        @app.errorhandler(WrongTokenError)
+        @app.exception(WrongTokenError)
         def handle_wrong_token_error(e):
             return self._invalid_token_callback(str(e))
 
-        @app.errorhandler(RevokedTokenError)
+        @app.exception(RevokedTokenError)
         def handle_revoked_token_error(e):
             return self._revoked_token_callback()
 
-        @app.errorhandler(FreshTokenRequired)
+        @app.exception(FreshTokenRequired)
         def handle_fresh_token_required(e):
             return self._needs_fresh_token_callback()
 

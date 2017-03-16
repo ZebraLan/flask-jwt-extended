@@ -5,48 +5,19 @@ from functools import wraps
 
 import jwt
 import six
-from flask import request, current_app
 from werkzeug.security import safe_str_cmp
-try:
-    from flask import _app_ctx_stack as ctx_stack
-except ImportError:  # pragma: no cover
-    from flask import _request_ctx_stack as ctx_stack
 
-from flask_jwt_extended.config import get_access_expires, get_refresh_expires, \
+from sanic_jwt_extended.config import get_access_expires, get_refresh_expires, \
     get_algorithm, get_blacklist_enabled, get_blacklist_checks, get_jwt_header_type, \
     get_access_cookie_name, get_cookie_secure, get_access_cookie_path, \
     get_cookie_csrf_protect, get_access_csrf_cookie_name, \
     get_refresh_cookie_name, get_refresh_cookie_path, \
     get_refresh_csrf_cookie_name, get_token_location, \
     get_csrf_header_name, get_jwt_header_name, get_csrf_request_methods
-from flask_jwt_extended.exceptions import JWTEncodeError, JWTDecodeError, \
+from sanic_jwt_extended.exceptions import JWTEncodeError, JWTDecodeError, \
     InvalidHeaderError, NoAuthorizationError, WrongTokenError, \
     FreshTokenRequired, CSRFError
-from flask_jwt_extended.blacklist import check_if_token_revoked, store_token
-
-
-def get_jwt_identity():
-    """
-    Returns the identity of the JWT in this context. If no JWT is present,
-    None is returned.
-    """
-    return get_raw_jwt().get('identity', {})
-
-
-def get_jwt_claims():
-    """
-    Returns the dictionary of custom use claims in this JWT. If no custom user
-    claims are present, an empty dict is returned
-    """
-    return get_raw_jwt().get('user_claims', {})
-
-
-def get_raw_jwt():
-    """
-    Returns the python dictionary which has all of the data in this JWT. If no
-    JWT is currently present, and empty dict is returned
-    """
-    return getattr(ctx_stack.top, 'jwt', {})
+from sanic_jwt_extended.blacklist import check_if_token_revoked, store_token
 
 
 def _create_csrf_token():
@@ -156,7 +127,7 @@ def _decode_jwt(token, secret, algorithm):
     return data
 
 
-def _decode_jwt_from_headers():
+def _decode_jwt_from_headers(request):
     # Verify we have the auth header
     header_name = get_jwt_header_name()
     jwt_header = request.headers.get(header_name, None)
@@ -182,7 +153,7 @@ def _decode_jwt_from_headers():
     return _decode_jwt(token, secret, algorithm)
 
 
-def _decode_jwt_from_cookies(type):
+def _decode_jwt_from_cookies(type, request):
     if type == 'access':
         cookie_key = get_access_cookie_name()
     else:
@@ -212,31 +183,31 @@ def _decode_jwt_from_cookies(type):
     return token
 
 
-def _decode_jwt_from_request(type):
+def _decode_jwt_from_request(type, request):
     token_locations = get_token_location()
 
     # JWT can be in either headers or cookies
     if 'headers' in token_locations and 'cookies' in token_locations:
         try:
-            return _decode_jwt_from_headers()
+            return _decode_jwt_from_headers(request)
         except NoAuthorizationError:
             pass
         try:
-            return _decode_jwt_from_cookies(type)
+            return _decode_jwt_from_cookies(type, request)
         except NoAuthorizationError:
             pass
         raise NoAuthorizationError("Missing JWT in header and cookies")
 
     # JWT can only be in headers
     elif 'headers' in token_locations:
-        return _decode_jwt_from_headers()
+        return _decode_jwt_from_headers(request)
 
     # JWT can only be in cookie
     else:
-        return _decode_jwt_from_cookies(type)
+        return _decode_jwt_from_cookies(type, request)
 
 
-def jwt_required(fn):
+def jwt_required(urls):
     """
     If you decorate a vew with this, it will ensure that the requester has a valid
     JWT before calling the actual view. This does not check the freshness of the
@@ -246,86 +217,86 @@ def jwt_required(fn):
 
     :param fn: The view function to decorate
     """
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        # Attempt to decode the token
-        jwt_data = _decode_jwt_from_request(type='access')
+    @current_app.middleware('request')
+    async def _jwt_required_middleware(request):
+        if request.url in urls:
+            # Attempt to decode the token
+            jwt_data = _decode_jwt_from_request(type='access', request)
 
-        # Verify this is an access token
-        if jwt_data['type'] != 'access':
-            raise WrongTokenError('Only access tokens can access this endpoint')
+            # Verify this is an access token
+            if jwt_data['type'] != 'access':
+                raise WrongTokenError('Only access tokens can access this endpoint')
 
-        # If blacklisting is enabled, see if this token has been revoked
-        blacklist_enabled = get_blacklist_enabled()
-        if blacklist_enabled:
-            check_if_token_revoked(jwt_data)
+            # If blacklisting is enabled, see if this token has been revoked
+            blacklist_enabled = get_blacklist_enabled()
+            if blacklist_enabled:
+                check_if_token_revoked(jwt_data)
 
-        # Save the jwt in the context so that it can be accessed later by
-        # the various endpoints that is using this decorator
-        ctx_stack.top.jwt = jwt_data
-        return fn(*args, **kwargs)
-    return wrapper
-
-
-def fresh_jwt_required(fn):
-    """
-    If you decorate a vew with this, it will ensure that the requester has a valid
-    JWT before calling the actual view.
-
-    See also: jwt_required()
-
-    :param fn: The view function to decorate
-    """
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        # Attempt to decode the token
-        jwt_data = _decode_jwt_from_request(type='access')
-
-        # Verify this is an access token
-        if jwt_data['type'] != 'access':
-            raise WrongTokenError('Only access tokens can access this endpoint')
-
-        # If blacklisting is enabled, see if this token has been revoked
-        blacklist_enabled = get_blacklist_enabled()
-        if blacklist_enabled:
-            check_if_token_revoked(jwt_data)
-
-        # Check if the token is fresh
-        if not jwt_data['fresh']:
-            raise FreshTokenRequired('Fresh token required')
-
-        # Save the jwt in the context so that it can be accessed later by
-        # the various endpoints that is using this decorator
-        ctx_stack.top.jwt = jwt_data
-        return fn(*args, **kwargs)
-    return wrapper
+            # Save the jwt in the request so that it can be accessed later by
+            # the various endpoints that is using this decorator
+            request.jwt = jwt_data
+    return _jwt_required_middleware
 
 
-def jwt_refresh_token_required(fn):
-    """
-    If you decorate a view with this, it will insure that the requester has a
-    valid JWT refresh token before calling the actual view. If the token is
-    invalid, expired, not present, etc, the appropriate callback will be called
-    """
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        # Get the JWT
-        jwt_data = _decode_jwt_from_request(type='refresh')
-
-        # verify this is a refresh token
-        if jwt_data['type'] != 'refresh':
-            raise WrongTokenError('Only refresh tokens can access this endpoint')
-
-        # If blacklisting is enabled, see if this token has been revoked
-        blacklist_enabled = get_blacklist_enabled()
-        if blacklist_enabled:
-            check_if_token_revoked(jwt_data)
-
-        # Save the jwt in the context so that it can be accessed later by
-        # the various endpoints that is using this decorator
-        ctx_stack.top.jwt = jwt_data
-        return fn(*args, **kwargs)
-    return wrapper
+#def fresh_jwt_required(fn):
+#    """
+#    If you decorate a vew with this, it will ensure that the requester has a valid
+#    JWT before calling the actual view.
+#
+#    See also: jwt_required()
+#
+#    :param fn: The view function to decorate
+#    """
+#    @wraps(fn)
+#    def wrapper(*args, **kwargs):
+#        # Attempt to decode the token
+#        jwt_data = _decode_jwt_from_request(type='access', request)
+#
+#        # Verify this is an access token
+#        if jwt_data['type'] != 'access':
+#            raise WrongTokenError('Only access tokens can access this endpoint')
+#
+#        # If blacklisting is enabled, see if this token has been revoked
+#        blacklist_enabled = get_blacklist_enabled()
+#        if blacklist_enabled:
+#            check_if_token_revoked(jwt_data)
+#
+#        # Check if the token is fresh
+#        if not jwt_data['fresh']:
+#            raise FreshTokenRequired('Fresh token required')
+#
+#        # Save the jwt in the context so that it can be accessed later by
+#        # the various endpoints that is using this decorator
+#        ctx_stack.top.jwt = jwt_data
+#        return fn(*args, **kwargs)
+#    return wrapper
+#
+#
+#def jwt_refresh_token_required(fn):
+#    """
+#    If you decorate a view with this, it will insure that the requester has a
+#    valid JWT refresh token before calling the actual view. If the token is
+#    invalid, expired, not present, etc, the appropriate callback will be called
+#    """
+#    @wraps(fn)
+#    def wrapper(*args, **kwargs):
+#        # Get the JWT
+#        jwt_data = _decode_jwt_from_request(type='refresh', request)
+#
+#        # verify this is a refresh token
+#        if jwt_data['type'] != 'refresh':
+#            raise WrongTokenError('Only refresh tokens can access this endpoint')
+#
+#        # If blacklisting is enabled, see if this token has been revoked
+#        blacklist_enabled = get_blacklist_enabled()
+#        if blacklist_enabled:
+#            check_if_token_revoked(jwt_data)
+#
+#        # Save the jwt in the context so that it can be accessed later by
+#        # the various endpoints that is using this decorator
+#        ctx_stack.top.jwt = jwt_data
+#        return fn(*args, **kwargs)
+#    return wrapper
 
 
 def create_refresh_token(identity):
