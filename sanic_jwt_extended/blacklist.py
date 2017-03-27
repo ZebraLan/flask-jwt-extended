@@ -4,9 +4,9 @@ import datetime
 import json
 from functools import wraps
 
-from flask_jwt_extended.config import get_blacklist_checks, \
+from sanic_jwt_extended.config import get_blacklist_checks, \
     get_blacklist_store, get_blacklist_enabled
-from flask_jwt_extended.exceptions import RevokedTokenError
+from sanic_jwt_extended.exceptions import RevokedTokenError
 
 
 def _verify_blacklist_enabled(fn):

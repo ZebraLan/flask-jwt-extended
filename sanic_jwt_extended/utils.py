@@ -112,7 +112,10 @@ def _decode_jwt(token, secret, algorithm):
     """
     # ext, iat, and nbf are all verified by pyjwt. We just need to make sure
     # that the custom claims we put in the token are present
-    data = jwt.decode(token, secret, algorithm=algorithm)
+    ## lan 2017-03-17: yet, since sanic have no default handling of errors,
+    ## we have to catch DecodeError here
+    try: data = jwt.decode(token, secret, algorithm=algorithm)
+    except jwt.DecodeError as e: raise JWTDecodeError(str(e))
     if 'jti' not in data or not isinstance(data['jti'], six.string_types):
         raise JWTDecodeError("Missing or invalid claim: jti")
     if 'identity' not in data:
@@ -219,9 +222,9 @@ def jwt_required(urls):
     """
     @current_app.middleware('request')
     async def _jwt_required_middleware(request):
-        if request.url in urls:
+        if any(_ in request.url for _ in urls):
             # Attempt to decode the token
-            jwt_data = _decode_jwt_from_request(type='access', request)
+            jwt_data = _decode_jwt_from_request('access', request)
 
             # Verify this is an access token
             if jwt_data['type'] != 'access':
@@ -234,7 +237,7 @@ def jwt_required(urls):
 
             # Save the jwt in the request so that it can be accessed later by
             # the various endpoints that is using this decorator
-            request.jwt = jwt_data
+            request.args['jwt'] = [jwt_data]
     return _jwt_required_middleware
 
 
@@ -343,7 +346,7 @@ def create_access_token(identity, fresh=False):
 def _get_secret_key():
     key = current_app.config.get('SECRET_KEY', None)
     if not key:
-        raise RuntimeError('flask SECRET_KEY must be set')
+        raise RuntimeError('sanic SECRET_KEY must be set')
     return key
 
 
@@ -354,76 +357,76 @@ def _get_csrf_token(encoded_token):
     return token['csrf']
 
 
-def set_access_cookies(response, encoded_access_token):
-    """
-    Takes a flask response object, and configures it to set the encoded access
-    token in a cookie (as well as a csrf access cookie if enabled)
-    """
-    if 'cookies' not in get_token_location():
-        raise RuntimeWarning("set_access_cookies() called without "
-                             "'JWT_TOKEN_LOCATION' configured to use cookies")
-
-    # Set the access JWT in the cookie
-    response.set_cookie(get_access_cookie_name(),
-                        value=encoded_access_token,
-                        secure=get_cookie_secure(),
-                        httponly=True,
-                        path=get_access_cookie_path())
-
-    # If enabled, set the csrf double submit access cookie
-    if get_cookie_csrf_protect():
-        response.set_cookie(get_access_csrf_cookie_name(),
-                            value=_get_csrf_token(encoded_access_token),
-                            secure=get_cookie_secure(),
-                            httponly=False,
-                            path='/')
-
-
-def set_refresh_cookies(response, encoded_refresh_token):
-    """
-    Takes a flask response object, and configures it to set the encoded refresh
-    token in a cookie (as well as a csrf refresh cookie if enabled)
-    """
-    if 'cookies' not in get_token_location():
-        raise RuntimeWarning("set_refresh_cookies() called without "
-                             "'JWT_TOKEN_LOCATION' configured to use cookies")
-
-    # Set the refresh JWT in the cookie
-    response.set_cookie(get_refresh_cookie_name(),
-                        value=encoded_refresh_token,
-                        secure=get_cookie_secure(),
-                        httponly=True,
-                        path=get_refresh_cookie_path())
-
-    # If enabled, set the csrf double submit refresh cookie
-    if get_cookie_csrf_protect():
-        response.set_cookie(get_refresh_csrf_cookie_name(),
-                            value=_get_csrf_token(encoded_refresh_token),
-                            secure=get_cookie_secure(),
-                            httponly=False,
-                            path='/')
-
-
-def unset_jwt_cookies(response):
-    """
-    Takes a flask response object, and configures it to unset (delete) the JWT
-    cookies. Basically, this is a logout helper method if using cookies to store
-    the JWT
-    """
-    if 'cookies' not in get_token_location():
-        raise RuntimeWarning("unset_refresh_cookies() called without "
-                             "'JWT_TOKEN_LOCATION' configured to use cookies")
-
-    response.set_cookie(get_refresh_cookie_name(),
-                        value='',
-                        expires=0,
-                        secure=get_cookie_secure(),
-                        httponly=True,
-                        path=get_refresh_cookie_path())
-    response.set_cookie(get_access_cookie_name(),
-                        value='',
-                        expires=0,
-                        secure=get_cookie_secure(),
-                        httponly=True,
-                        path=get_access_cookie_path())
-    return response
+#def set_access_cookies(response, encoded_access_token):
+#    """
+#    Takes a sanic response object, and configures it to set the encoded access
+#    token in a cookie (as well as a csrf access cookie if enabled)
+#    """
+#    if 'cookies' not in get_token_location():
+#        raise RuntimeWarning("set_access_cookies() called without "
+#                             "'JWT_TOKEN_LOCATION' configured to use cookies")
+#
+#    # Set the access JWT in the cookie
+#    response.set_cookie(get_access_cookie_name(),
+#                        value=encoded_access_token,
+#                        secure=get_cookie_secure(),
+#                        httponly=True,
+#                        path=get_access_cookie_path())
+#
+#    # If enabled, set the csrf double submit access cookie
+#    if get_cookie_csrf_protect():
+#        response.set_cookie(get_access_csrf_cookie_name(),
+#                            value=_get_csrf_token(encoded_access_token),
+#                            secure=get_cookie_secure(),
+#                            httponly=False,
+#                            path='/')
+#
+#
+#def set_refresh_cookies(response, encoded_refresh_token):
+#    """
+#    Takes a flask response object, and configures it to set the encoded refresh
+#    token in a cookie (as well as a csrf refresh cookie if enabled)
+#    """
+#    if 'cookies' not in get_token_location():
+#        raise RuntimeWarning("set_refresh_cookies() called without "
+#                             "'JWT_TOKEN_LOCATION' configured to use cookies")
+#
+#    # Set the refresh JWT in the cookie
+#    response.set_cookie(get_refresh_cookie_name(),
+#                        value=encoded_refresh_token,
+#                        secure=get_cookie_secure(),
+#                        httponly=True,
+#                        path=get_refresh_cookie_path())
+#
+#    # If enabled, set the csrf double submit refresh cookie
+#    if get_cookie_csrf_protect():
+#        response.set_cookie(get_refresh_csrf_cookie_name(),
+#                            value=_get_csrf_token(encoded_refresh_token),
+#                            secure=get_cookie_secure(),
+#                            httponly=False,
+#                            path='/')
+#
+#
+#def unset_jwt_cookies(response):
+#    """
+#    Takes a flask response object, and configures it to unset (delete) the JWT
+#    cookies. Basically, this is a logout helper method if using cookies to store
+#    the JWT
+#    """
+#    if 'cookies' not in get_token_location():
+#        raise RuntimeWarning("unset_refresh_cookies() called without "
+#                             "'JWT_TOKEN_LOCATION' configured to use cookies")
+#
+#    response.set_cookie(get_refresh_cookie_name(),
+#                        value='',
+#                        expires=0,
+#                        secure=get_cookie_secure(),
+#                        httponly=True,
+#                        path=get_refresh_cookie_path())
+#    response.set_cookie(get_access_cookie_name(),
+#                        value='',
+#                        expires=0,
+#                        secure=get_cookie_secure(),
+#                        httponly=True,
+#                        path=get_access_cookie_path())
+#    return response
