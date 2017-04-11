@@ -11,4 +11,4 @@ setup(name='Sanic-JWT-Extended',
       packages=['sanic_jwt_extended'],
       zip_safe=False,
       platforms='any',
-      install_requires=['Sanic', 'PyJWT', 'simplekv', 'six'])
+      install_requires=['Sanic', 'PyJWT', 'simplekv', 'six', 'werkzeug'])
